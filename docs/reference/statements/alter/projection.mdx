@@ -285,10 +285,10 @@ Use the statement below to add a projection description to a tables metadata:
 
 ```sql
 -- Normal projection (supports WHERE)
-ALTER TABLE [db.]name [ON CLUSTER cluster] ADD PROJECTION [IF NOT EXISTS] name ( SELECT <COLUMN LIST EXPR> [WHERE <expr>] [ORDER BY] ) [WITH SETTINGS ( setting_name1 = setting_value1, setting_name2 = setting_value2, ...)]
+ALTER TABLE [db.]name [ON CLUSTER cluster] ADD PROJECTION [IF NOT EXISTS] name [( column_name1 [type1] [CODEC(codec1)], ...) AS] ( SELECT <COLUMN LIST EXPR> [WHERE <expr>] [ORDER BY] ) [WITH SETTINGS ( setting_name1 = setting_value1, setting_name2 = setting_value2, ...)]
 
 -- Aggregate projection (supports WHERE)
-ALTER TABLE [db.]name [ON CLUSTER cluster] ADD PROJECTION [IF NOT EXISTS] name ( SELECT <COLUMN LIST EXPR> [WHERE <expr>] [GROUP BY] ) [WITH SETTINGS ( setting_name1 = setting_value1, setting_name2 = setting_value2, ...)]
+ALTER TABLE [db.]name [ON CLUSTER cluster] ADD PROJECTION [IF NOT EXISTS] name [( column_name1 [type1] [CODEC(codec1)], ...) AS] ( SELECT <COLUMN LIST EXPR> [WHERE <expr>] [GROUP BY] ) [WITH SETTINGS ( setting_name1 = setting_value1, setting_name2 = setting_value2, ...)]
 ```
 
 <Note>
@@ -313,6 +313,55 @@ ADD PROJECTION p (
 ```
 
 Projection settings override the effective table settings for the projection, subject to validation rules (e.g., invalid or incompatible overrides will be rejected).
+
+#### Column list {#projection-column-list}
+
+An optional column list before the projection query declares **per-column compression codecs** for the
+projection. Since a projection stores its own copy of the data, often in a different sort order, a column
+may compress better inside the projection than it does in the parent table.
+
+Example:
+
+```sql
+ALTER TABLE t
+ADD PROJECTION p
+(
+    ts CODEC(DoubleDelta, ZSTD)
+)
+AS
+(
+    SELECT id, ts ORDER BY ts
+);
+```
+
+The list is partial: only the columns whose codec is being overridden need to appear in it. Columns the
+projection query produces but the list omits keep the codec the projection would otherwise use. Every
+column that does appear must be produced by the projection query.
+
+`CODEC` is the only property a column may declare here, because everything else about a projection's
+columns follows from its query. Declaring a default expression, `COMMENT`, `TTL`, `STATISTICS`, a
+collation, column settings, a `NULL` modifier, or `PRIMARY KEY` is rejected rather than ignored, as is a
+codec on a subcolumn such as `a.x`.
+
+A column's type is optional. Omitting it declares only the codec and leaves the column free to change type
+with the parent table. Writing it asserts that the projection query produces that exact type, and that
+assertion is enforced for as long as the projection exists, so a `MODIFY COLUMN` changing the type is
+rejected:
+
+```sql
+ALTER TABLE t ADD PROJECTION p (ts CODEC(DoubleDelta), id UInt64 CODEC(NONE)) AS (SELECT id, ts ORDER BY ts);
+
+ALTER TABLE t MODIFY COLUMN ts DateTime64(3);   -- allowed: `ts` was declared without a type
+ALTER TABLE t MODIFY COLUMN id Int64;           -- rejected: breaks projection p
+```
+
+To change the type of a column that was declared with one, drop the projection, modify the column, and add
+the projection back — which rebuilds all of the projection's parts.
+
+The effective codecs of a projection's columns are reported by the `codecs` column of
+[`system.projections`](/reference/system-tables/projections). A column list is not accepted for
+[projection indexes](/reference/engines/table-engines/mergetree-family/mergetree#projection-index),
+whose single column is generated rather than selected.
 
 ### MODIFY PROJECTION {#modify-projection}
 

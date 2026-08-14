@@ -1,0 +1,128 @@
+-- { echo ON }
+
+DROP TABLE IF EXISTS t_codec_validation;
+
+-- Whether a declaration spells out the type must not change which codecs are accepted: the
+-- type-sensitive checks run against the type the SELECT produces either way.
+
+-- A floating-point time series codec on an integer column is suspicious, declared type or not.
+CREATE TABLE t_codec_validation
+(
+    x UInt64,
+    PROJECTION p
+    (
+        x UInt64 CODEC(Gorilla)
+    )
+    AS
+    (
+        SELECT x ORDER BY x
+    )
+)
+ENGINE = MergeTree ORDER BY x; -- { serverError BAD_ARGUMENTS }
+
+CREATE TABLE t_codec_validation
+(
+    x UInt64,
+    PROJECTION p
+    (
+        x CODEC(Gorilla)
+    )
+    AS
+    (
+        SELECT x ORDER BY x
+    )
+)
+ENGINE = MergeTree ORDER BY x; -- { serverError BAD_ARGUMENTS }
+
+-- The setting still reaches the check, so the user can opt out of it.
+SET allow_suspicious_codecs = 1;
+
+CREATE TABLE t_codec_validation
+(
+    x UInt64,
+    PROJECTION p
+    (
+        x CODEC(Gorilla)
+    )
+    AS
+    (
+        SELECT x ORDER BY x
+    )
+)
+ENGINE = MergeTree ORDER BY x;
+
+SELECT codecs FROM system.projections WHERE database = currentDatabase() AND table = 't_codec_validation';
+
+DROP TABLE t_codec_validation;
+SET allow_suspicious_codecs = 0;
+
+-- The inverse: a lossy codec is valid on a float column and must not be rejected merely because the
+-- declaration left the type out. `SZ3` refuses to be applied where the column type is unknown.
+SET allow_experimental_codecs = 1;
+
+CREATE TABLE t_codec_validation
+(
+    x Float64,
+    PROJECTION p
+    (
+        x CODEC(SZ3)
+    )
+    AS
+    (
+        SELECT x ORDER BY x
+    )
+)
+ENGINE = MergeTree ORDER BY x;
+
+SELECT codecs FROM system.projections WHERE database = currentDatabase() AND table = 't_codec_validation';
+
+DROP TABLE t_codec_validation;
+SET allow_experimental_codecs = 0;
+
+-- The same check applies when the projection arrives by `ALTER`.
+CREATE TABLE t_codec_validation (x UInt64) ENGINE = MergeTree ORDER BY x;
+
+ALTER TABLE t_codec_validation ADD PROJECTION p
+(
+    x CODEC(Gorilla)
+)
+AS
+(
+    SELECT x ORDER BY x
+); -- { serverError BAD_ARGUMENTS }
+
+SET allow_suspicious_codecs = 1;
+
+ALTER TABLE t_codec_validation ADD PROJECTION p
+(
+    x CODEC(Gorilla)
+)
+AS
+(
+    SELECT x ORDER BY x
+);
+
+SELECT codecs FROM system.projections WHERE database = currentDatabase() AND table = 't_codec_validation';
+
+SET allow_suspicious_codecs = 0;
+DROP TABLE t_codec_validation;
+
+-- A keyword is usable as a declared column name when quoted; the declaration list is only
+-- distinguished from a `SELECT` by the leading token.
+CREATE TABLE t_codec_validation
+(
+    `select` UInt64,
+    PROJECTION p
+    (
+        `select` CODEC(ZSTD(3))
+    )
+    AS
+    (
+        SELECT `select` ORDER BY `select`
+    )
+)
+ENGINE = MergeTree ORDER BY `select`;
+
+SELECT codecs FROM system.projections WHERE database = currentDatabase() AND table = 't_codec_validation';
+
+DROP TABLE t_codec_validation;

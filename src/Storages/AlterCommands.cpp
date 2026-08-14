@@ -2447,6 +2447,17 @@ void AlterCommands::validate(const StoragePtr & table, ContextPtr context) const
         {
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Table doesn't have SAMPLE BY, cannot remove");
         }
+        else if (command.type == AlterCommand::ADD_PROJECTION)
+        {
+            /// Only the declared-column form needs this, and building the projection is not free, so
+            /// leave every other `ADD PROJECTION` to report its failures from `apply` as before.
+            if (command.projection_decl->as<const ASTProjectionDeclaration &>().columns)
+            {
+                auto projection = ProjectionDescription::getProjectionFromAST(
+                    command.projection_decl, all_columns, &metadata->partition_key, context, LoadingStrictnessLevel::CREATE);
+                ProjectionDescription::validateDeclaredColumnCodecs(projection, context, LoadingStrictnessLevel::CREATE);
+            }
+        }
 
         /// Collect default expressions for MODIFY and ADD commands
         if (command.type == AlterCommand::MODIFY_COLUMN || command.type == AlterCommand::ADD_COLUMN)
