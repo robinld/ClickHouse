@@ -363,9 +363,6 @@ void ProjectionDescription::validateDeclaredColumnCodecs(
     const auto & settings = query_context->getSettingsRef();
 
     /// Only a declared column carries a codec of its own, so this covers exactly the declaration.
-    /// Codecs whose validity depends on the type - lossy ones, and the floating-point time series
-    /// ones - are checked here and nowhere else, so the type has to be the resolved one rather than
-    /// whatever the declaration happened to spell out.
     for (const auto & column : projection.metadata->getColumns())
     {
         if (!column.codec)

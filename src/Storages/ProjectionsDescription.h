@@ -109,8 +109,7 @@ struct ProjectionDescription
     /// validation phase: `getProjectionFromAST` runs on stored metadata too, and on the `CREATE` path it
     /// is reached with the global context, so a check placed there would both miss the user's settings
     /// and make a table using a suspicious codec impossible to attach. Takes the built projection
-    /// because the type-sensitive checks need the type the SELECT produces, which a declaration is not
-    /// required to spell out.
+    /// because a declaration need not spell out the type, and the type-sensitive checks need it.
     static void validateDeclaredColumnCodecs(
         const ProjectionDescription & projection,
         const ContextPtr & query_context,

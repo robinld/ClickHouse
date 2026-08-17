@@ -2449,8 +2449,8 @@ void AlterCommands::validate(const StoragePtr & table, ContextPtr context) const
         }
         else if (command.type == AlterCommand::ADD_PROJECTION)
         {
-            /// Only the declared-column form needs this, and building the projection is not free, so
-            /// leave every other `ADD PROJECTION` to report its failures from `apply` as before.
+            /// Building the projection here would otherwise move every other `ADD PROJECTION`'s
+            /// failures from `apply` to this point.
             if (command.projection_decl->as<const ASTProjectionDeclaration &>().columns)
             {
                 auto projection = ProjectionDescription::getProjectionFromAST(

@@ -2,8 +2,7 @@
 
 DROP TABLE IF EXISTS t_codec_validation;
 
--- Whether a declaration spells out the type must not change which codecs are accepted: the
--- type-sensitive checks run against the type the SELECT produces either way.
+-- Whether a declaration spells out the type must not change which codecs are accepted.
 
 -- A floating-point time series codec on an integer column is suspicious, declared type or not.
 CREATE TABLE t_codec_validation

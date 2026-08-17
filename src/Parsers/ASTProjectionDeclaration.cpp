@@ -142,7 +142,9 @@ void ASTProjectionDeclaration::formatImpl(
 void ASTProjectionDeclaration::formatBody(
     WriteBuffer & ostr, const FormatSettings & settings, FormatState & state, FormatStateStacked frame) const
 {
-    if (columns)
+    /// A column list is only ever printed with the query it belongs to: on its own it would format
+    /// to `p (...) AS` with nothing after `AS`, which does not parse back.
+    if (columns && query)
     {
         std::string indent_str = settings.one_line ? "" : std::string(4u * frame.indent, ' ');
         std::string nl_or_nothing = settings.one_line ? "" : "\n";
