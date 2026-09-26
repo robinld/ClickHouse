@@ -71,11 +71,11 @@ SET distributed_ddl_task_timeout = 180;
 SET distributed_ddl_output_mode = 'throw';
 SET allow_projection_column_list_in_replicated_metadata = 1;
 CREATE TABLE t_projection_column_list_cluster_create ON CLUSTER test_shard_localhost
-    (x UInt64, PROJECTION p (x CODEC(ZSTD)) AS (SELECT x ORDER BY x))
+    (x UInt64, PROJECTION p (x UInt64) AS (SELECT x ORDER BY x))
     ENGINE = ReplicatedMergeTree('/clickhouse/tables/{database}/t_projection_column_list_cluster_create', 'r1')
     ORDER BY x FORMAT Null;
 ALTER TABLE t_projection_column_list_cluster_alter ON CLUSTER test_shard_localhost
-    ADD PROJECTION p (x CODEC(ZSTD)) AS (SELECT x ORDER BY x) FORMAT Null;
+    ADD PROJECTION p (x UInt64) AS (SELECT x ORDER BY x) FORMAT Null;
 SELECT count() FROM system.projections
     WHERE database = currentDatabase() AND table = 't_projection_column_list_cluster_create';
 SELECT count() FROM system.projections

@@ -51,6 +51,7 @@
 #include <Storages/MaterializedView/RefreshSet.h>
 #include <Storages/MaterializedView/RefreshTask.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
+#include <Storages/ProjectionsDescription.h>
 #include <Storages/StorageAlias.h>
 #include <Storages/StorageFactory.h>
 #include <Storages/StorageInMemoryMetadata.h>
@@ -1842,8 +1843,7 @@ void checkProjectionColumnListReplicationCompatibility(
     if (!is_fresh_definition
         || context->isRecoveryFromStoredMetadata()
         || context->isDDLOrOnClusterInternal()
-        || context->getClientInfo().is_replicated_database_internal
-        || context->getSettingsRef()[Setting::allow_projection_column_list_in_replicated_metadata])
+        || context->getClientInfo().is_replicated_database_internal)
         return;
 
     if (const auto metadata_txn = context->getZooKeeperMetadataTransaction();
@@ -1854,11 +1854,16 @@ void checkProjectionColumnListReplicationCompatibility(
         return;
 #endif
 
-    if (!isStorageReplicated(create) && create.cluster.empty()
-        && !(database && (database->getEngineName() == "Replicated" || database->getEngineName() == "Shared")))
+    const bool reject_column_list = !context->getSettingsRef()[Setting::allow_projection_column_list_in_replicated_metadata]
+        && (isStorageReplicated(create) || !create.cluster.empty()
+            || (database && (database->getEngineName() == "Replicated" || database->getEngineName() == "Shared")));
+    const bool reject_old_format_codec = !create.cluster.empty()
+        && context->getSettingsRef()[Setting::distributed_ddl_entry_format_version].value == DDLLogEntry::OLDEST_VERSION;
+    if (!reject_column_list && !reject_old_format_codec)
         return;
 
     bool has_projection_column_list = false;
+    bool has_projection_column_codec = false;
     if (create.columns_list && create.columns_list->projections)
     {
         for (const auto & projection_ast : create.columns_list->projections->children)
@@ -1867,7 +1872,7 @@ void checkProjectionColumnListReplicationCompatibility(
                 declaration && declaration->columns)
             {
                 has_projection_column_list = true;
-                break;
+                has_projection_column_codec |= hasDeclaredProjectionColumnCodec(*declaration);
             }
         }
     }
@@ -1896,17 +1901,22 @@ void checkProjectionColumnListReplicationCompatibility(
                     declaration && declaration->columns)
                 {
                     has_projection_column_list = true;
-                    break;
+                    has_projection_column_codec |= hasDeclaredProjectionColumnCodec(*declaration);
                 }
             }
         }
     }
 
-    if (has_projection_column_list)
+    if (reject_column_list && has_projection_column_list)
         throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
             "Projection column lists in replicated metadata require setting "
             "allow_projection_column_list_in_replicated_metadata = 1. "
             "Upgrade every replica before enabling it");
+
+    if (reject_old_format_codec && has_projection_column_codec)
+        throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
+            "Projection column CODEC declarations in ON CLUSTER DDL require "
+            "distributed_ddl_entry_format_version >= 2, because version 1 does not carry codec validation settings");
 }
 
 }

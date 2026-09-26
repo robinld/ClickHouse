@@ -368,6 +368,20 @@ private:
 
 }
 
+bool hasDeclaredProjectionColumnCodec(const ASTProjectionDeclaration & declaration)
+{
+    if (!declaration.columns)
+        return false;
+
+    for (const auto & child : declaration.columns->children)
+    {
+        if (const auto * column = child ? child->as<const ASTColumnDeclaration>() : nullptr;
+            column && column->getCodec())
+            return true;
+    }
+    return false;
+}
+
 void ProjectionDescription::validateDeclaredColumnCodecs(
     const ProjectionDescription & projection,
     const ContextPtr & query_context,

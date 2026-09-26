@@ -34,7 +34,7 @@ expect_disabled_before_enqueue() {
 
 ${CLICKHOUSE_CLIENT} -q "
     CREATE TABLE ${source_table}
-        (x UInt64, PROJECTION p (x CODEC(ZSTD)) AS (SELECT x ORDER BY x))
+        (x UInt64, PROJECTION p (x UInt64) AS (SELECT x ORDER BY x))
         ENGINE = MergeTree ORDER BY x"
 
 expect_disabled_before_enqueue copy "

@@ -25,6 +25,7 @@ using IColumnPermutation = PaddedPODArray<size_t>;
 
 struct KeyDescription;
 
+class ASTProjectionDeclaration;
 class ASTProjectionSelectQuery;
 
 struct MergeTreeSettings;
@@ -177,6 +178,9 @@ struct ProjectionDescription
 
     String getDirectoryName() const { return name + ".proj"; }
 };
+
+/// Whether the explicit column list carries a CODEC that may need session-dependent validation.
+bool hasDeclaredProjectionColumnCodec(const ASTProjectionDeclaration & declaration);
 
 using ProjectionDescriptionRawPtr = const ProjectionDescription *;
 

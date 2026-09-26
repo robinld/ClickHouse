@@ -41,6 +41,7 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Storages/MergeTree/MergeTreeVirtualColumns.h>
+#include <Storages/ProjectionsDescription.h>
 
 #include <Functions/UserDefined/UserDefinedSQLFunctionFactory.h>
 #include <Functions/UserDefined/UserDefinedSQLFunctionVisitor.h>
@@ -68,6 +69,7 @@ namespace Setting
     extern const SettingsUInt64 max_parser_backtracks;
     extern const SettingsBool use_legacy_to_time;
     extern const SettingsBool allow_projection_column_list_in_replicated_metadata;
+    extern const SettingsUInt64 distributed_ddl_entry_format_version;
 }
 
 namespace ServerSetting
@@ -127,6 +129,68 @@ void checkProjectionColumnListReplicationCompatibility(
                     "Upgrade every replica before enabling it");
         }
     }
+}
+
+void checkProjectionCodecOldDistributedDDLCompatibility(
+    const ASTAlterQuery & alter, const StoragePtr & table, const ContextPtr & context)
+{
+    /// Format 1 stores no query settings. Codec validation on the worker would therefore use its
+    /// own defaults, even when the initiator explicitly allowed a suspicious or gated codec.
+    if (context->getSettingsRef()[Setting::distributed_ddl_entry_format_version].value != DDLLogEntry::OLDEST_VERSION)
+        return;
+
+    bool changes_column_type = false;
+    for (const auto & child : alter.command_list->children)
+    {
+        const auto & command = child->as<const ASTAlterCommand &>();
+        if ((command.type == ASTAlterCommand::ADD_PROJECTION || command.type == ASTAlterCommand::MODIFY_PROJECTION)
+            && command.projection_decl
+            && hasDeclaredProjectionColumnCodec(command.projection_decl->as<const ASTProjectionDeclaration &>()))
+            throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
+                "Projection column CODEC declarations in ON CLUSTER DDL require "
+                "distributed_ddl_entry_format_version >= 2, because version 1 does not carry codec validation settings");
+
+        if (command.type == ASTAlterCommand::MODIFY_COLUMN && command.col_decl
+            && command.col_decl->as<const ASTColumnDeclaration &>().getType())
+            changes_column_type = true;
+    }
+
+    if (!changes_column_type)
+        return;
+
+    /// A changed SELECT output type makes the worker validate a stored projection codec again.
+    /// If the table is absent on this host, its projection definitions cannot be checked safely.
+    if (!table)
+        throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
+            "MODIFY COLUMN ... ON CLUSTER with distributed_ddl_entry_format_version = 1 requires the table "
+            "on the initiator to check its projection codecs; use version >= 2");
+
+    const auto metadata = table->getInMemoryMetadataPtr(context, false);
+    const auto & projections = metadata->getProjections();
+    auto has_codec = [](const ASTPtr & definition)
+    {
+        const auto * declaration = definition ? definition->as<const ASTProjectionDeclaration>() : nullptr;
+        return declaration && hasDeclaredProjectionColumnCodec(*declaration);
+    };
+    bool has_existing_codec = false;
+    for (const auto & projection : projections)
+        if (has_codec(projection.definition_ast))
+        {
+            has_existing_codec = true;
+            break;
+        }
+    if (!has_existing_codec)
+        for (const auto & definition : projections.getUnavailableDefinitions())
+            if (has_codec(definition))
+            {
+                has_existing_codec = true;
+                break;
+            }
+
+    if (has_existing_codec)
+        throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
+            "MODIFY COLUMN ... ON CLUSTER can revalidate an existing projection CODEC on the worker; "
+            "distributed_ddl_entry_format_version = 1 does not carry codec validation settings. Use version >= 2");
 }
 
 void normalizeLegacyToTimeInAlterMetadataDefinitions(ASTAlterQuery & alter)
@@ -528,6 +592,7 @@ BlockIO InterpreterAlterQuery::executeToTable(const ASTAlterQuery & alter)
             alter, table,
             table_id ? DatabaseCatalog::instance().tryGetDatabase(table_id.database_name) : nullptr,
             getContext());
+        checkProjectionCodecOldDistributedDDLCompatibility(alter, table, getContext());
 
         /// Substitute the database of the altered table into table functions that use the current database
         /// implicitly, e.g. `merge('tables_regexp')` in a mutation, so that they read the same tables
