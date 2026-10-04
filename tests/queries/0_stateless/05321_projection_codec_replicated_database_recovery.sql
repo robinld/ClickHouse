@@ -14,7 +14,7 @@ CREATE TABLE {CLICKHOUSE_DATABASE:Identifier}.t_denied
     (k UInt64, v UInt64, PROJECTION p (v CODEC(ZSTD)) AS (SELECT k, v ORDER BY k))
 ENGINE = MergeTree ORDER BY k FORMAT Null; -- { serverError SUPPORT_IS_DISABLED }
 SELECT count() FROM system.tables
-WHERE database = {CLICKHOUSE_DATABASE:String} AND name = 't_denied';
+WHERE database = currentDatabase() AND name = 't_denied';
 
 SET allow_projection_column_codecs_in_replicated_or_distributed_ddl = 1;
 CREATE TABLE {CLICKHOUSE_DATABASE:Identifier}.t
