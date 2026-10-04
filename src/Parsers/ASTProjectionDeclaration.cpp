@@ -3,7 +3,6 @@
 #include <Common/SipHash.h>
 #include <Common/quoteString.h>
 #include <IO/Operators.h>
-#include <IO/WriteBufferFromString.h>
 #include <Parsers/ASTColumnDeclaration.h>
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTFunction.h>
@@ -11,8 +10,6 @@
 #include <Parsers/ASTJSONReadHelpers.h>
 #include <Parsers/ASTProjectionSelectQuery.h>
 #include <Parsers/ASTSetQuery.h>
-#include <Parsers/ExpressionListParsers.h>
-#include <Parsers/parseQuery.h>
 
 namespace DB
 {
@@ -81,26 +78,9 @@ void ASTProjectionDeclaration::readJSON(const Poco::JSON::Object & json)
     /// A JSON list can still contain a raw query or another parser-impossible child; projection
     /// indexes later use its elements as expressions. Reparse this slot and use the parser's tree,
     /// while leaving the declaration's `WITH SETTINGS` state untouched.
-    auto index_child = r.readCommaSeparatedExpressionListChild(
-        "index", /* require_nonempty = */ true, /* screen_expressions = */ true);
+    auto index_child = r.readParserExpressionListChild("index", /* allow_alias_without_as_keyword = */ false);
     if (index_child)
-    {
-        try
-        {
-            WriteBufferFromOwnString out;
-            index_child->format(out, IAST::FormatSettings(/*one_line=*/true));
-            ParserNotEmptyExpressionList parser(/* allow_alias_without_as_keyword_ = */ false);
-            ASTPtr parsed = parseQuery(parser, out.str(), 0, DBMS_DEFAULT_MAX_PARSER_DEPTH, DBMS_DEFAULT_MAX_PARSER_BACKTRACKS);
-            if (index_child->getTreeHash(/*ignore_aliases=*/false) != parsed->getTreeHash(/*ignore_aliases=*/false))
-                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Projection INDEX AST JSON differs from its SQL parser result");
-            set(index, parsed);
-        }
-        catch (const Exception & e)
-        {
-            throw Exception(ErrorCodes::BAD_ARGUMENTS,
-                "Projection INDEX AST JSON does not form a valid SQL expression list: {}", e.message());
-        }
-    }
+        set(index, index_child);
 
     /// `projection_type` and `with_settings` are typed members (`ASTFunction *` / `ASTSetQuery *`);
     /// restoring them through the generic child path would let a wrong node type reach `IAST::set`

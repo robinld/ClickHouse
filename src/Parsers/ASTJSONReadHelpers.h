@@ -146,6 +146,11 @@ public:
     ASTPtr readCommaSeparatedExpressionListChild(
         const char * key, bool require_nonempty = false, bool screen_expressions = false) const;
 
+    /// Restore a list produced by `ParserNotEmptyExpressionList`. A JSON list may contain nodes
+    /// that the SQL expression parser never creates, so compare it with the parsed SQL and return
+    /// the parser's tree before any caller can use its elements as expressions.
+    ASTPtr readParserExpressionListChild(const char * key, bool allow_alias_without_as_keyword) const;
+
     /// Read a child AST node and require it to be an identifier (`ASTIdentifier` or a subclass such
     /// as `ASTTableIdentifier`; this also accepts a parameterized identifier, which the parser
     /// produces as an `ASTIdentifier` carrying an `ASTQueryParameter` child). Database/table target

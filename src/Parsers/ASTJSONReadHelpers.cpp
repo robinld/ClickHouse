@@ -1,4 +1,5 @@
 #include <Parsers/ASTJSONReadHelpers.h>
+#include <Core/Defines.h>
 #include <Parsers/ASTFromJSON.h>
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTFunction.h>
@@ -10,8 +11,11 @@
 #include <Parsers/ASTSelectIntersectExceptQuery.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
+#include <Parsers/ExpressionListParsers.h>
+#include <Parsers/parseQuery.h>
 #include <Common/checkStackSize.h>
 #include <IO/ReadHelpers.h>
+#include <IO/WriteBufferFromString.h>
 
 #include <algorithm>
 #include <limits>
@@ -53,6 +57,29 @@ ASTPtr JSONObjectReader::readCommaSeparatedExpressionListChild(
             "Expected a {}comma-separated expression list for key '{}' during AST JSON deserialization",
             require_nonempty ? "non-empty " : "", key);
     return child;
+}
+
+ASTPtr JSONObjectReader::readParserExpressionListChild(const char * key, bool allow_alias_without_as_keyword) const
+{
+    ASTPtr child = readCommaSeparatedExpressionListChild(key, /* require_nonempty = */ true, /* screen_expressions = */ true);
+    if (!child)
+        return nullptr;
+
+    try
+    {
+        WriteBufferFromOwnString out;
+        child->format(out, IAST::FormatSettings(/*one_line=*/true));
+        ParserNotEmptyExpressionList parser(allow_alias_without_as_keyword);
+        ASTPtr parsed = parseQuery(parser, out.str(), 0, DBMS_DEFAULT_MAX_PARSER_DEPTH, DBMS_DEFAULT_MAX_PARSER_BACKTRACKS);
+        if (child->getTreeHash(/*ignore_aliases=*/false) != parsed->getTreeHash(/*ignore_aliases=*/false))
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Expression list for key '{}' differs from its SQL parser result", key);
+        return parsed;
+    }
+    catch (const Exception & e)
+    {
+        throw Exception(ErrorCodes::BAD_ARGUMENTS,
+            "Expression list for key '{}' does not form valid SQL expressions: {}", key, e.message());
+    }
 }
 
 ASTPtr JSONObjectReader::readIdentifierChild(const char * key) const
