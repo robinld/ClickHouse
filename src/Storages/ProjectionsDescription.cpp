@@ -275,6 +275,13 @@ String projectionDefinitionForComparison(const ProjectionDescription & projectio
         column.setCodec(std::move(codec_hashes));
     }
 
+    /// A codec declaration is bound to its output name, not its position in the list. Sort only
+    /// the comparison clone; the stored declaration keeps its original order and spelling.
+    ::sort(declaration.columns->children.begin(), declaration.columns->children.end(), [](const ASTPtr & lhs, const ASTPtr & rhs)
+    {
+        return lhs->as<const ASTColumnDeclaration &>().name < rhs->as<const ASTColumnDeclaration &>().name;
+    });
+
     return definition->formatIgnoringRedundantParentheses();
 }
 
