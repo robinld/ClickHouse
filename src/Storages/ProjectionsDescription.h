@@ -135,6 +135,8 @@ struct ProjectionDescription
 
     bool operator==(const ProjectionDescription & other) const;
     bool operator!=(const ProjectionDescription & other) const { return !(*this == other); }
+    /// `MODIFY PROJECTION` retains the old codec declaration, so only the current writer codec must match.
+    bool isEquivalentForSettingsOnlyAlter(const ProjectionDescription & other) const;
 
     bool isPrimaryKeyColumnPossiblyWrappedInFunctions(const ASTPtr & node) const;
 
@@ -225,5 +227,10 @@ private:
     Map map;
     ASTs unavailable;
 };
+
+/// The new projection column-list grammar cannot be replayed by older servers.
+bool hasProjectionColumnCodecs(const IAST & ast);
+bool hasProjectionColumnCodecs(const ProjectionsDescription & projections);
+void checkProjectionColumnCodecPublication(const ContextPtr & context, bool queued_ddl);
 
 }

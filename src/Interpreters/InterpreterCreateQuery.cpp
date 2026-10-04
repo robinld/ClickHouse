@@ -2142,6 +2142,22 @@ BlockIO InterpreterCreateQuery::createTable(ASTCreateQuery & create)
         }
     }
 
+    /// `CREATE ... AS table` has copied projections in `properties`, even if the submitted
+    /// query did not contain a projection declaration. Check before either DDL queue or the
+    /// ReplicatedMergeTree constructor can publish the normalized definition.
+    const bool queued_ddl = !create.cluster.empty() || (database && database->getEngineName() == "Replicated");
+    if (!as_table_saved.empty() && getContext()->isDDLOrOnClusterInternal()
+        && !getContext()->isRecoveryFromStoredMetadata() && hasProjectionColumnCodecs(properties.projections))
+        throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
+            "CREATE ... AS with projection column codecs requires distributed_ddl_entry_format_version >= {} "
+            "to normalize the source on the ON CLUSTER initiator",
+            DDLLogEntry::NORMALIZE_CREATE_ON_INITIATOR_VERSION);
+
+    if (!is_metadata_replay && !getContext()->isRecoveryFromStoredMetadata() && !create.attach_short_syntax
+        && (queued_ddl || is_storage_replicated)
+        && hasProjectionColumnCodecs(properties.projections))
+        checkProjectionColumnCodecPublication(getContext(), queued_ddl);
+
     bool allow_heavy_populate = getContext()->getSettingsRef()[Setting::database_replicated_allow_heavy_create] && create.is_populate;
     if (!allow_heavy_populate && database && database->getEngineName() == "Replicated" && (create.select || create.is_populate))
     {

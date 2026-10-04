@@ -1223,22 +1223,32 @@ void AlterCommand::apply(
             projection_decl, metadata.columns, &metadata.partition_key, context, LoadingStrictnessLevel::CREATE);
 
         /// Existing parts store projection data built from the query body, so only the `WITH SETTINGS` clause may change
-        auto definition_without_settings = [](const IAST & definition_ast)
+        auto without_settings = [](const ProjectionDescription & projection)
         {
-            auto cloned = definition_ast.clone();
-            auto & decl = cloned->as<ASTProjectionDeclaration &>();
-            cloned->reset(decl.with_settings);
-            return cloned->formatWithSecretsOneLine();
+            auto cloned = projection.clone();
+            auto & decl = cloned.definition_ast->as<ASTProjectionDeclaration &>();
+            cloned.definition_ast->reset(decl.with_settings);
+            return cloned;
         };
 
         const auto & old_projection = metadata.projections.get(projection_name);
-        if (definition_without_settings(*old_projection.definition_ast) != definition_without_settings(*new_projection.definition_ast))
+        if (!without_settings(old_projection).isEquivalentForSettingsOnlyAlter(without_settings(new_projection)))
             throw Exception(
                 ErrorCodes::BAD_ARGUMENTS,
                 "Cannot modify projection {}: only the WITH SETTINGS clause may be changed, "
                 "but the projection query differs from the existing one. "
                 "Use DROP PROJECTION and ADD PROJECTION to change the query",
                 projection_name);
+
+        /// The restated codec may have an explicit argument equivalent to an omitted one today.
+        /// Keep the old spelling so an omitted type-dependent width still follows later type changes.
+        auto preserved_definition = old_projection.definition_ast->clone();
+        auto & preserved_decl = preserved_definition->as<ASTProjectionDeclaration &>();
+        const auto & new_decl = new_projection.definition_ast->as<const ASTProjectionDeclaration &>();
+        preserved_definition->reset(preserved_decl.with_settings);
+        if (new_decl.with_settings)
+            preserved_definition->set(preserved_decl.with_settings, new_decl.with_settings->clone());
+        new_projection.definition_ast = std::move(preserved_definition);
 
         /// Intentionally not a mutation: the new settings apply lazily, to projection parts written
         /// by future inserts and merges. `MATERIALIZE PROJECTION` does not rebuild a projection that

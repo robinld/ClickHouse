@@ -78,7 +78,6 @@
 #include <Parsers/Access/ASTUserNameWithHost.h>
 #include <Parsers/CommonParsers.h>
 #include <Parsers/Lexer.h>
-#include <Parsers/ParserCreateQuery.h>
 #include <Parsers/ParserProjectionSelectQuery.h>
 #include <Parsers/parseQuery.h>
 
@@ -237,44 +236,30 @@ const std::unordered_map<String, ASTCreator> & getASTFactory()
     return factory;
 }
 
-/// Projection declarations have several parser-owned slots, including expression lists whose
-/// JSON representation can contain SQL separators and node types that the parser never emits.
-/// Reparse the complete formatted projection at this JSON boundary so the SQL grammar remains
-/// the source of truth. Return the parser's AST: execution and persistence then use exactly the
-/// declaration whose SQL spelling was checked, rather than an unchecked JSON-only shape.
-ASTPtr canonicalizeProjectionJSON(ASTPtr node)
+/// The projection `SELECT` owns expression slots whose JSON representation can contain nodes the
+/// SQL parser never emits. Check that its formatted SQL returns the same tree, then use the
+/// parser's AST for execution. The declaration's other children are validated in `readJSON`; do
+/// not reparse the whole declaration here because embedded `ASTSetQuery` flags are significant
+/// JSON state even when their SQL spelling is not parser-produced.
+ASTPtr canonicalizeProjectionSelectJSON(ASTPtr node)
 {
-    const bool is_declaration = node->as<ASTProjectionDeclaration>() != nullptr;
-    if (!is_declaration && !node->as<ASTProjectionSelectQuery>())
+    if (!node->as<ASTProjectionSelectQuery>())
         return node;
 
     try
     {
-        /// A SELECT projection contains only expression slots. Screen it before reparsing:
-        /// otherwise `count` without an `arguments` member can format as `count()` and be
-        /// normalized away before its parent declaration applies the expression check.
-        /// The declaration itself also contains an argument-less INDEX TYPE function, so do not
-        /// apply this screen to the whole declaration.
-        if (!is_declaration)
-            JSONObjectReader::screenArgumentlessFunctions(*node, "query");
+        /// `count` without an `arguments` member can format as `count()` and be normalized
+        /// away by the parser, so screen the original tree before comparing hashes.
+        JSONObjectReader::screenArgumentlessFunctions(*node, "query");
 
         WriteBufferFromOwnString out;
         node->format(out, IAST::FormatSettings(/*one_line=*/true));
         const String sql = out.str();
-        ASTPtr parsed;
-        if (is_declaration)
-        {
-            ParserProjectionDeclaration parser;
-            parsed = parseQuery(parser, sql, 0, DBMS_DEFAULT_MAX_PARSER_DEPTH, DBMS_DEFAULT_MAX_PARSER_BACKTRACKS);
-        }
-        else
-        {
-            ParserProjectionSelectQuery parser;
-            parsed = parseQuery(parser, sql, 0, DBMS_DEFAULT_MAX_PARSER_DEPTH, DBMS_DEFAULT_MAX_PARSER_BACKTRACKS);
-        }
+        ParserProjectionSelectQuery parser;
+        ASTPtr parsed = parseQuery(parser, sql, 0, DBMS_DEFAULT_MAX_PARSER_DEPTH, DBMS_DEFAULT_MAX_PARSER_BACKTRACKS);
 
-        /// A node such as a column declaration can format as a valid identifier while carrying
-        /// different semantics in the JSON AST. Accept only the exact parser-produced tree.
+        /// A malformed expression can format as valid SQL while carrying different JSON AST
+        /// semantics. Accept only the exact parser-produced `SELECT` tree.
         if (node->getTreeHash(/*ignore_aliases=*/false) != parsed->getTreeHash(/*ignore_aliases=*/false))
             throw Exception(ErrorCodes::BAD_ARGUMENTS,
                 "Projection AST JSON differs from its SQL parser result");
@@ -472,7 +457,7 @@ ASTPtr IAST::createFromJSON(const Poco::JSON::Object & json)
     /// readJSON may recursively call createFromJSON for child nodes.
     node->readJSON(json);
 
-    return canonicalizeProjectionJSON(std::move(node));
+    return canonicalizeProjectionSelectJSON(std::move(node));
 }
 
 

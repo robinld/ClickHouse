@@ -19,6 +19,7 @@
 #include <Parsers/ASTQueryWithOutput.h>
 #include <Parsers/ASTSystemQuery.h>
 #include <Processors/Sinks/EmptySink.h>
+#include <Storages/ProjectionsDescription.h>
 #include <base/sort.h>
 #include <Common/ZooKeeper/ZooKeeper.h>
 #if CLICKHOUSE_CLOUD
@@ -205,6 +206,9 @@ BlockIO executeDDLQueryOnCluster(const ASTPtr & query_ptr_, ContextPtr context, 
 
     /// Check access rights, assume that all servers have the same users config
     context->checkAccess(access_to_check);
+
+    if (hasProjectionColumnCodecs(*query_ptr))
+        checkProjectionColumnCodecPublication(context, /*queued_ddl=*/ true);
 
     DDLLogEntry entry;
     entry.hosts = std::move(hosts);
