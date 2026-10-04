@@ -201,6 +201,10 @@ struct ProjectionsDescription : public IHints<>
     bool has(const String & projection_name) const;
     const ProjectionDescription & get(const String & projection_name) const;
 
+    /// Check the name before analyzing an `ADD PROJECTION` declaration. Return false for an
+    /// `IF NOT EXISTS` no-op, including a declaration that could not be analyzed on load.
+    bool shouldAdd(const String & projection_name, bool if_not_exists) const;
+
     void
     add(ProjectionDescription && projection, const String & after_projection = String(), bool first = false, bool if_not_exists = false);
     void remove(const String & projection_name, bool if_exists);

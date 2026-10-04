@@ -1199,6 +1199,9 @@ void AlterCommand::apply(
     }
     else if (type == ADD_PROJECTION)
     {
+        if (!metadata.projections.shouldAdd(projection_name, if_not_exists))
+            return;
+
         auto projection = ProjectionDescription::getProjectionFromAST(
             projection_decl, metadata.columns, &metadata.partition_key, context, LoadingStrictnessLevel::CREATE);
         metadata.projections.add(std::move(projection), after_projection_name, first, if_not_exists);
@@ -1981,6 +1984,11 @@ void AlterCommands::prepare(const StorageInMemoryMetadata & metadata, bool share
 {
     auto columns = metadata.columns;
     std::unordered_set<String> columns_with_full_type_modify;
+    NameSet projection_names;
+    for (const auto & projection : metadata.projections)
+        projection_names.insert(projection.name);
+    for (const auto & name : metadata.projections.getUnavailableNames())
+        projection_names.insert(name);
 
     /// Used to tell whether a command restates the definition the table already has, so it must not
     /// depend on whether the redundant parentheses were written on one side and not on the other.
@@ -2113,6 +2121,17 @@ void AlterCommands::prepare(const StorageInMemoryMetadata & metadata, bool share
         {
             if (has_column && command.if_not_exists)
                 command.ignore = true;
+        }
+        else if (command.type == AlterCommand::ADD_PROJECTION)
+        {
+            /// Follow the names after preceding commands so a repeated `ADD PROJECTION IF NOT EXISTS`
+            /// is inert even when the first `ADD PROJECTION` is in this statement.
+            if (!projection_names.insert(command.projection_name).second && command.if_not_exists)
+                command.ignore = true;
+        }
+        else if (command.type == AlterCommand::DROP_PROJECTION && !command.clear && !command.partition)
+        {
+            projection_names.erase(command.projection_name);
         }
         else if (command.type == AlterCommand::DROP_COLUMN
                 || command.type == AlterCommand::COMMENT_COLUMN

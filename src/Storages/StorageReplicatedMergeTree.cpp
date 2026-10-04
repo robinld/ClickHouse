@@ -7038,7 +7038,7 @@ void StorageReplicatedMergeTree::alter(
     /// Direct replicated ALTERs bypass the database and ON CLUSTER DDL queues. Guard the
     /// transition that first places a codec declaration in shared table metadata here.
     for (const auto & command : commands)
-        if (command.type == AlterCommand::ADD_PROJECTION && command.projection_decl
+        if (command.type == AlterCommand::ADD_PROJECTION && !command.ignore && command.projection_decl
             && hasProjectionColumnCodecs(*command.projection_decl)
             && future_metadata.projections.toString() != metadata_snapshot->projections.toString())
             checkProjectionColumnCodecPublication(query_context, /*queued_ddl=*/ false);
