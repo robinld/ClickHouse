@@ -34,3 +34,13 @@ WITH
         '"order_by":{"type":"Identifier","name":"x"}},"columns":{"type":"ExpressionList"',
         '"order_by":{"type":"Identifier","name":"x"}},"columns":{"type":"ExpressionList","separator":";"') AS malformed
 SELECT formatQueryFromJSON(malformed); -- { serverError BAD_ARGUMENTS }
+
+-- A raw query node cannot occupy a projection INDEX expression slot.
+WITH
+    parseQueryToJSON('CREATE TABLE t (x UInt64, PROJECTION p INDEX x TYPE commit_order) ENGINE = MergeTree ORDER BY x') AS original,
+    JSONExtractRaw(parseQueryToJSON('SELECT 1'), 'list_of_selects', 'children', 1) AS raw_query,
+    replaceOne(
+        original,
+        '"index":{"type":"ExpressionList","children":[{"type":"Identifier","name":"x"}]}',
+        concat('"index":{"type":"ExpressionList","children":[', raw_query, ']}')) AS malformed
+SELECT formatQueryFromJSON(malformed); -- { serverError BAD_ARGUMENTS }
